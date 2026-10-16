@@ -7,6 +7,42 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added — 2026-10-16
+
+- contracts/token/src/lib.rs: `transfer_admin()` now emits an `("admXfer",)`
+  event with payload `(old_admin: Address, new_admin: Address)` (#101).
+  Added `EVT_ADM_XFER` constant (`symbol_short!("admXfer")`), matching the
+  vesting contract's pattern for consistency. Off-chain systems monitoring admin
+  changes now receive an on-chain signal without polling `admin()`. New test:
+  `test_event_transfer_admin` asserts the event is emitted with the correct
+  old and new admin addresses and that `admin()` returns the new admin.
+  `contracts/token/README.md` events table and `transfer_admin` doc updated.
+
+- contracts/multisig/src/lib.rs: `is_executable(env, proposal_id: u64) -> bool`
+  view function (#103). Returns `true` when the proposal's status is `Pending`
+  and `confirmation_count >= threshold`. Encapsulates the two-step
+  `get_proposal` + `get_threshold` check, making it easy for UIs and bots to
+  poll readiness without making two RPC calls or implementing the logic
+  themselves. Read-only — no TTL bump. Five new tests:
+  `test_is_executable_false_before_threshold`,
+  `test_is_executable_true_at_threshold`,
+  `test_is_executable_false_after_execution`,
+  `test_is_executable_false_after_cancel`,
+  `test_is_executable_nonexistent_panics`.
+  `contracts/multisig/README.md` updated with function entry.
+
+- scripts/create-schedule-example.js: Node.js example script that sends a
+  `POST /api/vesting/schedule` request to the backend API (#110). Uses the
+  built-in Node 18+ `fetch` — no external npm dependencies. Reads `API_URL`
+  from the environment (defaults to `http://localhost:3001`). Uses placeholder
+  Stellar addresses matching `.env.example` pattern. Exits non-zero on HTTP
+  error or network failure. Usage comment at the top of the file.
+
+- .github/CODEOWNERS: GitHub CODEOWNERS file assigning `@unajiogenyi05-hub`
+  as the reviewer for all files, with explicit patterns for `contracts/`,
+  `.github/`, `backend/`, `frontend/`, and `scripts/` (#116). Includes an
+  explanatory comment on how to add new reviewers.
+
 ### Changed — 2026-10-16
 
 - .github/workflows/ci.yml: bumped `node-version` from `'20'` to `'24'` in the

@@ -191,6 +191,21 @@ extend TTL.
 
 ---
 
+### `is_executable(env, proposal_id: u64) -> bool`
+
+Returns `true` if the proposal identified by `proposal_id` is ready to
+execute: its status is `Pending` **and** `confirmation_count >= threshold`.
+
+Encapsulates the two-step check (`get_proposal` + `get_threshold`) that
+callers would otherwise need to perform manually. Useful for UIs and off-chain
+bots that poll proposal readiness without triggering execution.
+
+Read-only — does not extend TTL or write any storage.
+
+**Panics:** `"proposal not found"` — `proposal_id` does not exist in storage.
+
+---
+
 ### `extend_ttl(env)`
 
 Permissionless. Extends the contract instance TTL to `INSTANCE_BUMP_LEDGERS`

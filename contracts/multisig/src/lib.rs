@@ -526,6 +526,27 @@ impl MultisigContract {
         owners.iter().any(|o| o == address)
     }
 
+    /// Return `true` if a proposal is ready to execute: status is `Pending`
+    /// and `confirmation_count >= threshold`.
+    ///
+    /// Encapsulates the two-step check (`get_proposal` + `get_threshold`)
+    /// that callers would otherwise need to perform manually. Useful for UIs
+    /// and off-chain bots that poll proposal readiness without executing.
+    ///
+    /// Read-only — does not extend TTL or write any storage.
+    ///
+    /// # Panics
+    /// - `"proposal not found"` — `proposal_id` does not exist in storage.
+    pub fn is_executable(env: Env, proposal_id: u64) -> bool {
+        let proposal: ProposalData = env
+            .storage()
+            .persistent()
+            .get(&DataKey::Proposal(proposal_id))
+            .expect("proposal not found");
+        let threshold: u32 = env.storage().instance().get(&THRESHOLD).unwrap_or(0);
+        proposal.status == ProposalStatus::Pending && proposal.confirmation_count >= threshold
+    }
+
     /// Extend the contract instance TTL to `INSTANCE_BUMP_LEDGERS`.
     ///
     /// This is a permissionless keep-alive for contracts that are only read
@@ -1207,6 +1228,107 @@ mod tests {
         assert!(ms.is_owner(&o1));
         let stranger = Address::generate(&env);
         assert!(!ms.is_owner(&stranger));
+    }
+
+    // ── is_executable ────────────────────────────────────────────────────────
+
+    /// is_executable returns false before threshold confirmations are reached.
+    #[test]
+    fn test_is_executable_false_before_threshold() {
+        let (env, contract_id, o1, _o2, _o3) = setup_2of3();
+        let ms = MultisigContractClient::new(&env, &contract_id);
+        let stub_id = env.register(stub_token::StubToken, ());
+
+        let id = ms.submit(
+            &o1,
+            &call_action(&env, &stub_id, symbol_short!("ping")),
+            &String::from_str(&env, "is_executable test"),
+        );
+
+        // No confirmations yet — not executable.
+        assert!(!ms.is_executable(&id));
+
+        // One confirmation (threshold is 2) — still not executable.
+        ms.confirm(&o1, &id);
+        assert!(!ms.is_executable(&id));
+    }
+
+    /// is_executable returns true exactly when confirmation_count >= threshold.
+    #[test]
+    fn test_is_executable_true_at_threshold() {
+        let (env, contract_id, o1, o2, _o3) = setup_2of3();
+        let ms = MultisigContractClient::new(&env, &contract_id);
+        let stub_id = env.register(stub_token::StubToken, ());
+
+        let id = ms.submit(
+            &o1,
+            &call_action(&env, &stub_id, symbol_short!("ping")),
+            &String::from_str(&env, "is_executable threshold test"),
+        );
+
+        ms.confirm(&o1, &id);
+        ms.confirm(&o2, &id); // threshold = 2, now met
+
+        assert!(
+            ms.is_executable(&id),
+            "should be executable once threshold is reached"
+        );
+    }
+
+    /// is_executable returns false after the proposal has been executed.
+    #[test]
+    fn test_is_executable_false_after_execution() {
+        let (env, contract_id, o1, o2, _o3) = setup_2of3();
+        let ms = MultisigContractClient::new(&env, &contract_id);
+        let stub_id = env.register(stub_token::StubToken, ());
+
+        let id = ms.submit(
+            &o1,
+            &call_action(&env, &stub_id, symbol_short!("ping")),
+            &String::from_str(&env, "is_executable after execute"),
+        );
+
+        ms.confirm(&o1, &id);
+        ms.confirm(&o2, &id);
+        ms.execute(&id);
+
+        // After execution the status is Executed — no longer Pending.
+        assert!(
+            !ms.is_executable(&id),
+            "executed proposal should not be executable again"
+        );
+    }
+
+    /// is_executable returns false after the proposal has been cancelled.
+    #[test]
+    fn test_is_executable_false_after_cancel() {
+        let (env, contract_id, o1, o2, _o3) = setup_2of3();
+        let ms = MultisigContractClient::new(&env, &contract_id);
+        let stub_id = env.register(stub_token::StubToken, ());
+
+        let id = ms.submit(
+            &o1,
+            &call_action(&env, &stub_id, symbol_short!("ping")),
+            &String::from_str(&env, "is_executable after cancel"),
+        );
+
+        ms.confirm(&o1, &id);
+        ms.confirm(&o2, &id);
+        ms.cancel(&o1, &id);
+
+        assert!(
+            !ms.is_executable(&id),
+            "cancelled proposal should not be executable"
+        );
+    }
+
+    /// is_executable panics when the proposal does not exist.
+    #[test]
+    #[should_panic(expected = "proposal not found")]
+    fn test_is_executable_nonexistent_panics() {
+        let (env, contract_id, _o1, _o2, _o3) = setup_2of3();
+        let ms = MultisigContractClient::new(&env, &contract_id);
+        ms.is_executable(&999u64);
     }
 
     #[test]

@@ -62,6 +62,7 @@ const EVT_TRANSFER: Symbol = symbol_short!("transfer");
 const EVT_APPROVE: Symbol = symbol_short!("approve");
 const EVT_PAUSE: Symbol = symbol_short!("pause");
 const EVT_UNPAUSE: Symbol = symbol_short!("unpause");
+const EVT_ADM_XFER: Symbol = symbol_short!("admXfer");
 
 // ─── Contract ─────────────────────────────────────────────────────────────────
 
@@ -333,11 +334,21 @@ impl TokenContract {
     ///
     /// # Panics
     /// - Current admin not initialized in storage
+    ///
+    /// # Events
+    /// Emits `(admXfer,)` → `(old_admin: Address, new_admin: Address)`
     pub fn transfer_admin(env: Env, new_admin: Address) {
         Self::bump_instance(&env);
-        Self::require_admin(&env);
+        let old_admin: Address = env
+            .storage()
+            .instance()
+            .get(&ADMIN)
+            .expect("not initialized");
+        old_admin.require_auth();
         new_admin.require_auth();
         env.storage().instance().set(&ADMIN, &new_admin);
+        env.events()
+            .publish((EVT_ADM_XFER,), (old_admin, new_admin));
     }
 
     // ── Metadata reads ──────────────────────────────────────────────────────
@@ -833,6 +844,34 @@ mod tests {
                 )
             ]
         );
+    }
+
+    #[test]
+    fn test_event_transfer_admin() {
+        let (env, contract_id, old_admin) = deploy();
+        let token = TokenContractClient::new(&env, &contract_id);
+        let new_admin = Address::generate(&env);
+
+        token.transfer_admin(&new_admin);
+
+        // transfer_admin() is the only call that emits an event here, so
+        // the event list contains exactly one entry.  Both old and new admin
+        // must appear in the payload so off-chain indexers can reconstruct the
+        // full admin hand-off chain without extra RPC calls.
+        assert_eq!(
+            env.events().all(),
+            vec![
+                &env,
+                (
+                    contract_id.clone(),
+                    (symbol_short!("admXfer"),).into_val(&env),
+                    (old_admin.clone(), new_admin.clone()).into_val(&env),
+                )
+            ]
+        );
+
+        // The new admin is now in storage.
+        assert_eq!(token.admin(), new_admin);
     }
 
     // ── Allowance edge cases ──────────────────────────────────────────────────
